@@ -50,3 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# service directories
+.idea
+# executables and binaries
+*.exe
+*.i
