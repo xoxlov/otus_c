@@ -56,3 +56,4 @@ dkms.conf
 # executables and binaries
 *.exe
 *.i
+*.s
