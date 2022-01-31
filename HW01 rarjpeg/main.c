@@ -20,6 +20,21 @@
 //   https://ru.wikipedia.org/wiki/Список_сигнатур_файлов
 //   https://habr.com/ru/company/infowatch/blog/337084/
 //   https://users.cs.jmu.edu/buchhofp/forensics/formats/pkzip.html
+// ---------------------------------------------------------------------------------------------------------------------
+// Есть ряд небольших замечаний:
+// 1. https://github.com/xoxlov/otus_c/blob/84401269222244543b25fa5edfb5ba26e375554b/HW01%20rarjpeg/main.c#L56-L61
+//   + данную функцию можно заменить библиотечной memcmp.
+//2. https://github.com/xoxlov/otus_c/blob/84401269222244543b25fa5edfb5ba26e375554b/HW01%20rarjpeg/main.c#L91-L102
+//   - если я правильно понял то, что делает эта функция, её можно заменить библиотечной fseek. И в целом есть ощущение,
+//   что код можно сделать чуть ловчее, если использовать fseek и ftell.
+//3. https://github.com/xoxlov/otus_c/blob/84401269222244543b25fa5edfb5ba26e375554b/HW01%20rarjpeg/main.c#L145-L146
+//   - за счёт того, что __STDC_LIB_EXT1__ - необязательное расширение стандарта, на некоторых компиляторах (например,
+//   на моём GCC под Linux) такой код не скомпилируется. Используйте strncpy, эта функция гарантированно есть везде.
+//   Кроме того, нет необходимости копировать имя файла в промежуточный буфер, argv[1] вполне можно передать аргументом в fopen.
+//4. https://github.com/xoxlov/otus_c/blob/84401269222244543b25fa5edfb5ba26e375554b/HW01%20rarjpeg/main.c#L146
+//   - кроме того, было бы неплохо добавить проверку на успешное открытие файла, чтобы в случае ошибки пользователя
+//   программа не рушилась с ошибкой, а сообщала о проблеме и завершалась.
+// ---------------------------------------------------------------------------------------------------------------------
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +46,7 @@
 enum ErrorCodes {
     SIGNATURE_VALID = 0,
     ERROR_ARGUMENTS,
+    ERROR_FILE_OPEN,
     ERROR_UNRECOGNIZED,
     ERROR_END_OF_FILE,
     ERROR_NOT_VALID,
@@ -53,23 +69,9 @@ short analyzeInputArguments(int argc) {
     return EXIT_SUCCESS;
 }
 
-short compareSignature(unsigned char *src1, unsigned char *src2, size_t size) {
-    short ret_code = 1;
-    for (size_t i = 0; i < size; ++i)
-        ret_code *= (short) (src1[i] == src2[i]);
-    return ret_code ? SIGNATURE_VALID : ERROR_NOT_VALID;
-}
-
 short readSignature(FILE *input, unsigned char *signature, size_t size) {
-    short ret_code = EXIT_SUCCESS;
-    int chr;
-    for (size_t i = 0; i < size && ERROR_END_OF_FILE != ret_code; ++i) {
-        chr = fgetc(input);
-        if (EOF == chr)
-            ret_code = ERROR_END_OF_FILE;
-        signature[i] = (unsigned char) chr;
-    }
-    return ret_code;
+    fread(signature, sizeof(char), size, input);
+    return (feof(input)) ? ERROR_END_OF_FILE : EXIT_SUCCESS;
 }
 
 short findSignature(FILE *input, unsigned char *signature, unsigned char* sign2find, size_t size) {
@@ -82,22 +84,9 @@ short findSignature(FILE *input, unsigned char *signature, unsigned char* sign2f
         signature[size - 1] = (unsigned char) chr;
         if (EOF == chr)
             ret_code = ERROR_END_OF_FILE;
-        else if (compareSignature(signature, sign2find, size) == EXIT_SUCCESS)
+        else if (memcmp(signature, sign2find, size) == 0)
             ret_code = EXIT_SUCCESS;
     } while (ERROR_NOT_VALID == ret_code);
-    return ret_code;
-}
-
-short readSkipBytes(FILE* input, size_t size) {
-    short ret_code = EXIT_SUCCESS;
-    int chr;
-    size_t count = 0;
-    do {
-        chr = fgetc(input);
-        if (EOF == chr)
-            ret_code = ERROR_END_OF_FILE;
-        ++count;
-    } while (EXIT_SUCCESS == ret_code && count < size);
     return ret_code;
 }
 
@@ -105,10 +94,10 @@ short listFilesFromCentralDirectory(FILE* input, unsigned char* signature) {
     do {
         if (ERROR_END_OF_FILE == findSignature(input, signature, ZIP_central, sizeof ZIP_central))
             break;
-        readSkipBytes(input, 24);
+        fseek(input, 24, SEEK_CUR);
         if (ERROR_END_OF_FILE == readSignature(input, signature, sizeof FILENAME_len))
             break;
-        readSkipBytes(input, 16);
+        fseek(input, 16, SEEK_CUR);
         int filename_len = signature[0];
         if (ERROR_END_OF_FILE == readSignature(input, signature, filename_len))
             break;
@@ -139,34 +128,37 @@ int main(int argc, char* argv[]) {
         exit(ERROR_ARGUMENTS);
 
     size_t ret_code = EXIT_SUCCESS;
-    char input_file[MAX_FILE_NAME_LEN + 1];
+    char input_file_name[MAX_FILE_NAME_LEN + 1];
     FILE* input;
 
-    strcpy_s(input_file, MAX_FILE_NAME_LEN, argv[1]); // remember input file name
-    fopen_s(&input, input_file, "rb");
+    strcpy(input_file_name, argv[1]); // remember input file name
+    if (NULL == (input = fopen(input_file_name, "rb"))) {
+        printf("Cannot open file %s.\n", input_file_name);
+        exit(ERROR_FILE_OPEN);
+    }
     unsigned char signature[SIGNATURE_SIZE];
     do {
-        // read and check JPEG signature
+        // read and check JPEG signature, memcpy used for Signature Validation
         if (((ret_code = readSignature(input, signature, sizeof JPEG_start)) == ERROR_END_OF_FILE) ||
-            ((ret_code = compareSignature(signature, JPEG_start, sizeof JPEG_start)) == ERROR_NOT_VALID) ||
+            ((ret_code = memcmp(signature, JPEG_start, sizeof JPEG_start)) != SIGNATURE_VALID) ||
             ((ret_code = findSignature(input, signature, JPEG_end, sizeof JPEG_end)) == ERROR_END_OF_FILE))
             break;
         // read and check ZIP Signature
         if (((ret_code = readSignature(input, signature, sizeof ZIP_start)) == ERROR_END_OF_FILE) ||
-            ((ret_code = compareSignature(signature, ZIP_start, sizeof ZIP_start)) == ERROR_NOT_VALID) ||
+            ((ret_code = memcmp(signature, ZIP_start, sizeof ZIP_start)) != SIGNATURE_VALID) ||
             ((ret_code = readSignature(input, signature, sizeof ZIP_regular)) == ERROR_END_OF_FILE))
             break;
-        if ((SIGNATURE_VALID == compareSignature(signature, ZIP_empty, sizeof ZIP_empty))) {
+        if ((SIGNATURE_VALID == memcmp(signature, ZIP_empty, sizeof ZIP_empty))) {
             ret_code = ARC_IS_EMPTY;
             break;
         }
-        if (SIGNATURE_VALID == compareSignature(signature, ZIP_regular, sizeof ZIP_regular)) {
+        if (SIGNATURE_VALID == memcmp(signature, ZIP_regular, sizeof ZIP_regular)) {
             ret_code = listFilesFromCentralDirectory(input, signature);
             break;
         }
         ret_code = ERROR_UNRECOGNIZED;
     } while (0);
     fclose(input);
-    printErrorMessage(ret_code, input_file);
+    printErrorMessage(ret_code, input_file_name);
     return ret_code;
 }
