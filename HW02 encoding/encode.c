@@ -56,7 +56,7 @@ int16_t* charsets[] = {
 int16_t* recognizeEncodingTable(char* encoding) {
     size_t encodings_len = sizeof encodings / sizeof encodings[0];
     for (size_t i = 0; i < encodings_len; ++i)
-        if (0 == strcmp(encoding, encodings[i]))
+        if (0 == strncmp(encoding, encodings[i], strlen(encodings[i])))
             return charsets[i];
     return NULL;
 }

@@ -11,6 +11,13 @@
 //   Приложение корректно обрабатывает ошибки доступа к файлам.
 //   Код компилируется без warning'ов с ключами компилятора -Wall -Wextra -Wpedantic -std=c11.
 //   Далее успешность определяется code review.
+// ---------------------------------------------------------------------------------------------------------------------
+// Есть только одна придирка к стилю и одна проблема в коде:
+// 1. https://github.com/xoxlov/otus_c/blob/84401269222244543b25fa5edfb5ba26e375554b/HW02%20encoding/main.c#L31 -
+//    довольно замысловатая проверка, можно было ругнуться справочным текстом сразу, если ARGS_COUNT == argc.
+// 2. https://github.com/xoxlov/otus_c/blob/84401269222244543b25fa5edfb5ba26e375554b/HW02%20encoding/main.c#L59-L60 -
+//    тут опять-таки проблема с необязательностью _s расширений, и тоже не хватает проверки на успешность открытия файла.
+// ---------------------------------------------------------------------------------------------------------------------
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -24,14 +31,18 @@
   #define PROGRAM_NAME "decode"
 #endif
 
+#define MAX_FILE_NAME_LEN  255
+#define ERROR_FILE_OPEN    2
+
 short analyzeInputArguments(int argc, char* argv[]) {
     size_t encodings_len = getEncodingsCount();
-    int isArgsCountCorrect = (ARGS_COUNT == argc);
+    bool isArgsCountCorrect = (ARGS_COUNT == argc);
     bool isEncodingNameWrong = true;
-    for (size_t i = 0; isArgsCountCorrect && isEncodingNameWrong && i < encodings_len; ++i)
-        if (false == (isEncodingNameWrong = strcmp(argv[2], encodings[i])))
-            break;
-    if (isEncodingNameWrong) {
+    if (isArgsCountCorrect)
+        for (size_t i = 0; i < encodings_len; ++i)
+            if (false == (isEncodingNameWrong = strncmp(argv[2], encodings[i], strlen(encodings[i]))))
+                break;
+    if (isEncodingNameWrong) { // includes isArgsCountCorrect == false
         printf("Converting text encodings to UTF-8. Usage: \n%s infile codepage outfile\n", PROGRAM_NAME);
         printf("    infile: the input file,\n");
         printf("    codepage: the encoding name [");
@@ -56,15 +67,21 @@ int main(int argc, char* argv[]) {
     int ret_code = EXIT_SUCCESS;
     strlcpy(src_file, argv[1], MAX_FILE_NAME_LEN);
     strlcpy(dst_file, argv[3], MAX_FILE_NAME_LEN);
-    fopen_s(&src, src_file, "rb");
-    fopen_s(&dst, dst_file, "wb");
+    if (NULL == (src = fopen(src_file, "rb"))) {
+        printf("Cannot open file %s.\n", src_file);
+        exit(ERROR_FILE_OPEN);
+    }
+    if (NULL == (dst = fopen(dst_file, "wb"))) {
+        printf("Cannot open file %s.\n", dst_file);
+        exit(ERROR_FILE_OPEN);
+    }
     int16_t* table = recognizeEncodingTable(argv[2]);
 
     for (;;) {
         int16_t chr = fgetc(src);
         if (feof(src))
             break;
-        if (chr < 0x80) { // ASCII table
+        if (chr < ASCII_CONSTANT) {
             fputc((unsigned char) chr, dst);
             continue;
         }
