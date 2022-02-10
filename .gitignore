@@ -53,6 +53,7 @@ dkms.conf
 
 # service directories
 .idea
+.vscode
 # executables and binaries
 *.exe
 *.i
